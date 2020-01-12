@@ -30,33 +30,36 @@ class FD2HS:
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
 
-        pin1 = config.get("hall_sensor_1")
-        pin2 = config.get("hall_sensor_2")
+        pin1 = config.get('hall_sensor_1')
+        pin2 = config.get('hall_sensor_2')
         if pin1==pin2:
             raise config.error("Can't use the same pin for hall_sensor_1 and hall_sensor_2")
 
+        # Start adc
         self.hall_1 = printer.lookup_object("pins").setup_pin("adc", pin1)
         self.hall_2 = printer.lookup_object("pins").setup_pin("adc", pin2)
+        self.hall_1.setup_minmax(ADC_SAMPLE_TIME, ADC_SAMPLE_COUNT)
+        self.hall_2.setup_minmax(ADC_SAMPLE_TIME, ADC_SAMPLE_COUNT)
+        
+        self.hall_1.setup_adc_callback(ADC_REPORT_TIME, self.hall_1_callback)
+        self.hall_2.setup_adc_callback(ADC_REPORT_TIME, self.hall_2_callback)
 
-        self.nominal_filament_dia = config.getfloat(
-            'nominal_filament_diameter', above=1.0)
+
+        self.nominal_filament_dia = config.getfloat('nominal_filament_diameter', above=1.0)
         self.measurement_delay = config.getfloat('measurement_delay', above=0.)
-        self.max_diameter = config.getfloat(
-            'max_filament_diameter', above=self.nominal_filament_dia)
-        self.min_diameter = config.getfloat(
-            'min_filament_diameter', above=1.0)
+        self.max_diameter = config.getfloat('max_filament_diameter', above=self.nominal_filament_dia)
+        self.min_diameter = config.getfloat('min_filament_diameter', above=1.0)
+        
         self.is_active = True
+        
         # filament array [position, filamentWidth]
         self.filament_array = []
         self.lastFilamentWidthReading = 0
+        
         # printer objects
-        self.toolhead = self.ppins = self.mcu_adc = None
+        self.toolhead = None
         self.printer.register_event_handler("klippy:ready", self.handle_ready)
-        # Start adc
-        self.ppins = self.printer.lookup_object('pins')
-        self.mcu_adc = self.ppins.setup_pin('adc', self.pin)
-        self.mcu_adc.setup_minmax(ADC_SAMPLE_TIME, ADC_SAMPLE_COUNT)
-        self.mcu_adc.setup_adc_callback(ADC_REPORT_TIME, self.adc_callback)
+        
         # extrude factor updating
         self.extrude_factor_update_timer = self.reactor.register_timer(
             self.extrude_factor_update_event)
@@ -79,9 +82,16 @@ class FD2HS:
         self.reactor.update_timer(self.extrude_factor_update_timer,
                                   self.reactor.NOW)
 
-    def adc_callback(self, read_time, read_value):
-        # read sensor value
-        self.lastFilamentWidthReading = round(read_value * 5, 2)
+    def hall_1_callback(self, read_time, read_value):
+        # read sensor 1 value
+        self.last_hall_1_read_time = read_time
+        self.last_hall_1_read_value = read_value
+
+    def hall_2_callback(self, read_time, read_value):
+        # read sensor 2 value
+        self.last_hall_2_read_time = read_time
+        self.last_hall_2_reading = read_value
+
 
     def update_filament_array(self, last_epos):
         # Fill array
@@ -91,12 +101,14 @@ class FD2HS:
             next_reading_position = (self.filament_array[-1][0]
                                      + MEASUREMENT_INTERVAL_MM)
             if next_reading_position <= (last_epos + self.measurement_delay):
-                self.filament_array.append([last_epos + self.measurement_delay,
-                                            self.lastFilamentWidthReading])
+                self.filament_array.append(
+                    [last_epos + self.measurement_delay, self.lastFilamentWidthReading]  ## todo: missing lastFilamentWidthReading
+                )
         else:
             # add first item to array
-            self.filament_array.append([self.measurement_delay + last_epos,
-                                        self.lastFilamentWidthReading])
+            self.filament_array.append(
+                [self.measurement_delay + last_epos, self.lastFilamentWidthReading]
+            )
 
     def extrude_factor_update_event(self, eventtime):
         # Update extrude factor
