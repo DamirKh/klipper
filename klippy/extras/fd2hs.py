@@ -19,11 +19,16 @@
 # 3. Two free ADC inputs on Your mcu board
 #       (Or You can add another mcu board)
 # 4. 3d printed case case
+# DIA = DIAMETR
 
 ADC_REPORT_TIME = 0.500
 ADC_SAMPLE_TIME = 0.001
 ADC_SAMPLE_COUNT = 8
 MEASUREMENT_INTERVAL_MM = 5
+
+FILAMENT_MAX_DIA = 3.0
+FILAMENT_MIN_DIA = 1.0
+FILAMENT_DEFAULT_NOMINAL_DIA = 1.75
 
 class FD2HS:
     def __init__(self, config):
@@ -45,10 +50,12 @@ class FD2HS:
         self.hall_2.setup_adc_callback(ADC_REPORT_TIME, self.hall_2_callback)
 
 
-        self.nominal_filament_dia = config.getfloat('nominal_filament_diameter', above=1.0)
+        self.nominal_filament_dia = config.getfloat('nominal_filament_diameter', FILAMENT_DEFAULT_NOMINAL_DIA)
+        self.max_diameter = config.getfloat('max_filament_diameter', FILAMENT_MAX_DIA)
+        self.min_diameter = config.getfloat('min_filament_diameter', FILAMENT_MIN_DIA)
+        if not self.min_diameter < self.nominal_filament_dia < self.max_diameter:
+            raise config.error("Incorrect diameter values in configuration")
         self.measurement_delay = config.getfloat('measurement_delay', above=0.)
-        self.max_diameter = config.getfloat('max_filament_diameter', above=self.nominal_filament_dia)
-        self.min_diameter = config.getfloat('min_filament_diameter', above=1.0)
         
         self.is_active = True
         
