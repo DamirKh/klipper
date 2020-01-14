@@ -22,7 +22,7 @@
 # DIA = DIAMETR
 
 # Can I do import here?
-import pickle
+import cPickle as pickle
 import hashlib
 
 ADC_REPORT_TIME = 0.500
@@ -35,20 +35,27 @@ FILAMENT_MIN_DIA = 1.0
 FILAMENT_DEFAULT_NOMINAL_DIA = 1.75
 
 MAX_SENSORS_TIME_DIFF = 0.01
-DUMP_FILE = "/home/pi/dump.fd2hs"
+DUMP_FILE_PATH = "/home/pi/dump.fd2hs"
 
 class FD2HS:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
         
-        self.dump_file_path = config.get('DUMP_FILE', default = DUMP_FILE)
-        try:
-            with open(self.dump_file_path, "a+b") as f:
-                #just to check we can read and write file
-                pass
+        # dump file is using to store measured filament widht
+        # This is good for bouden feeder with big value of measurement_delay
+        self.dump_file_path = config.get('DUMP_FILE', default = DUMP_FILE_PATH)
+        try:  #check we can read and write file
+            f = open(self.dump_file_path, "a+b")
         except IOError:
-            raise config.error("DUMP file error: %s" % self.dump_file_path)
+            raise config.error("DUMP file permission error: %s" % self.dump_file_path)
+        else:
+            f.close()
+        
+        # filament array [position, filamentWidth]
+        self.filament_array = []
+        self.lastFilamentWidthReading = 0
+        self._prev_fillament_array_hash = 0
         
         pin1 = config.get('hall_sensor_1')
         pin2 = config.get('hall_sensor_2')
@@ -70,10 +77,6 @@ class FD2HS:
         if not self.min_diameter < self.nominal_filament_dia < self.max_diameter:
             raise config.error("Incorrect diameter values in configuration")
         self.measurement_delay = config.getfloat('measurement_delay', above=0.)
-        
-        # filament array [position, filamentWidth]
-        self.filament_array = []
-        self.lastFilamentWidthReading = 0
         
         # printer objects
         self.toolhead = None
@@ -117,14 +120,20 @@ class FD2HS:
 
     def save_array_to_file:
         """Dump filament width array to file"""
-        dump = pickle.dumps(self.filament_array)
-        array_current_hash = hashlib.md5(dump)
+        
+        dump = pickle.dumps(self.filament_array) # pickled representation of the fillament_array
+        array_current_hash = hashlib.md5(dump)  #hash of dump
         if not self._prev_fillament_array_hash = array_current_hash:
             # filament array has changed
-            #TODO write array to file
+            # write array to file
+            with open(self.dump_file_path, "wb") as f:
+                f.write(dump)
             self._prev_fillament_array_hash = array_current_hash
+        else:
+            # filament_array has't changed
+            # nothing to do
             pass
-        
+         
     def update_filament_array(self, last_epos):
         # Fill array
         if len(self.filament_array) > 0:
@@ -151,7 +160,7 @@ class FD2HS:
         # Update filament array for lastFilamentWidthReading
         self.update_filament_array(last_epos)
         # Does filament exists
-        if self.lastFilamentWidthReading > 0.5:
+        if self.lastFilamentWidthReading > 0.5: #hardcode to remove
             if len(self.filament_array) > 0:
                 # Get first position in filament array
                 pending_position = self.filament_array[0][0]
@@ -167,6 +176,7 @@ class FD2HS:
                     else:
                         self.gcode.run_script("M221 S100")
         else:
+            #No fillament
             self.gcode.run_script("M221 S100")
             self.filament_array = []
         return eventtime + 1
