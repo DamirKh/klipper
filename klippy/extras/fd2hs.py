@@ -35,12 +35,21 @@ FILAMENT_MIN_DIA = 1.0
 FILAMENT_DEFAULT_NOMINAL_DIA = 1.75
 
 MAX_SENSORS_TIME_DIFF = 0.01
+DUMP_FILE = "/home/pi/dump.fd2hs"
 
 class FD2HS:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
-
+        
+        self.dump_file_path = config.get('DUMP_FILE', default = DUMP_FILE)
+        try:
+            with open(self.dump_file_path, "a+b") as f:
+                #just to check we can read and write file
+                pass
+        except IOError:
+            raise config.error("DUMP file error: %s" % self.dump_file_path)
+        
         pin1 = config.get('hall_sensor_1')
         pin2 = config.get('hall_sensor_2')
         if pin1==pin2:
