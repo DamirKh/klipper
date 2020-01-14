@@ -18,8 +18,12 @@
 # 2c. Radial bearing F623ZZ 3x10x4mm - 2 pcs
 # 3. Two free ADC inputs on Your mcu board
 #       (Or You can add another mcu board)
-# 4. 3d printed case case
+# 4. 3D printed case
 # DIA = DIAMETR
+
+# Can I do import here?
+import pickle
+import hashlib
 
 ADC_REPORT_TIME = 0.500
 ADC_SAMPLE_TIME = 0.001
@@ -29,6 +33,8 @@ MEASUREMENT_INTERVAL_MM = 5
 FILAMENT_MAX_DIA = 3.0
 FILAMENT_MIN_DIA = 1.0
 FILAMENT_DEFAULT_NOMINAL_DIA = 1.75
+
+MAX_SENSORS_TIME_DIFF = 0.01
 
 class FD2HS:
     def __init__(self, config):
@@ -49,15 +55,12 @@ class FD2HS:
         self.hall_1.setup_adc_callback(ADC_REPORT_TIME, self.hall_1_callback)
         self.hall_2.setup_adc_callback(ADC_REPORT_TIME, self.hall_2_callback)
 
-
         self.nominal_filament_dia = config.getfloat('nominal_filament_diameter', FILAMENT_DEFAULT_NOMINAL_DIA)
         self.max_diameter = config.getfloat('max_filament_diameter', FILAMENT_MAX_DIA)
         self.min_diameter = config.getfloat('min_filament_diameter', FILAMENT_MIN_DIA)
         if not self.min_diameter < self.nominal_filament_dia < self.max_diameter:
             raise config.error("Incorrect diameter values in configuration")
         self.measurement_delay = config.getfloat('measurement_delay', above=0.)
-        
-        self.is_active = True
         
         # filament array [position, filamentWidth]
         self.filament_array = []
@@ -68,8 +71,7 @@ class FD2HS:
         self.printer.register_event_handler("klippy:ready", self.handle_ready)
         
         # extrude factor updating
-        self.extrude_factor_update_timer = self.reactor.register_timer(
-            self.extrude_factor_update_event)
+        self.extrude_factor_update_timer = self.reactor.register_timer(self.extrude_factor_update_event)
         # Register commands
         self.gcode = self.printer.lookup_object('gcode')
         self.gcode.register_command('QUERY_FILAMENT_WIDTH', self.cmd_M407)
@@ -79,6 +81,8 @@ class FD2HS:
                                     self.cmd_M406)
         self.gcode.register_command('ENABLE_FILAMENT_WIDTH_SENSOR',
                                     self.cmd_M405)
+        
+        self.is_active = True
 
     # Initialization
     def handle_ready(self):
@@ -86,8 +90,7 @@ class FD2HS:
         self.toolhead = self.printer.lookup_object('toolhead')
 
         # Start extrude factor update timer
-        self.reactor.update_timer(self.extrude_factor_update_timer,
-                                  self.reactor.NOW)
+        self.reactor.update_timer(self.extrude_factor_update_timer, self.reactor.NOW)
 
     def hall_1_callback(self, read_time, read_value):
         # read sensor 1 value
@@ -98,24 +101,39 @@ class FD2HS:
         # read sensor 2 value
         self.last_hall_2_read_time = read_time
         self.last_hall_2_reading = read_value
+        if abs (self.last_hall_2_read_time - self.last_hall_1_read_time) < MAX_SENSORS_TIME_DIFF:
+            # TODO: Add magic math formula here
+            self.lastFilamentWidthReading = (self.last_hall_1_read_value + self.last_hall_2_reading)/2 #This is joke!
+            pass
 
-
+    def save_array_to_file:
+        """Dump filament width array to file"""
+        dump = pickle.dumps(self.filament_array)
+        array_current_hash = hashlib.md5(dump)
+        if not self._prev_fillament_array_hash = array_current_hash:
+            # filament array has changed
+            #TODO write array to file
+            self._prev_fillament_array_hash = array_current_hash
+            pass
+        
     def update_filament_array(self, last_epos):
         # Fill array
         if len(self.filament_array) > 0:
             # Get last reading position in array & calculate next
             # reading position
-            next_reading_position = (self.filament_array[-1][0]
-                                     + MEASUREMENT_INTERVAL_MM)
+            next_reading_position = self.filament_array[-1][0] + MEASUREMENT_INTERVAL_MM
             if next_reading_position <= (last_epos + self.measurement_delay):
                 self.filament_array.append(
-                    [last_epos + self.measurement_delay, self.lastFilamentWidthReading]  ## todo: missing lastFilamentWidthReading
+                    [last_epos + self.measurement_delay, self.lastFilamentWidthReading]
                 )
+                self._array_changed = True
         else:
             # add first item to array
             self.filament_array.append(
                 [self.measurement_delay + last_epos, self.lastFilamentWidthReading]
             )
+            self._array_changed = True
+            self.save_array_to_file()
 
     def extrude_factor_update_event(self, eventtime):
         # Update extrude factor
